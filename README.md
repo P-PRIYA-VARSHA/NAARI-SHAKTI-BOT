@@ -27,5 +27,5 @@ An AI-powered solution designed to enhance women's safety and emergency response
 python app.py
 
 ### OUTPUTS
-📄 [Click here to view project outputs and screenshots](Naari Shakti AI OUTPUTS (1).docx)
+📄 [Click here to view project outputs and screenshots](Naari%20Shakti%20AI%20OUTPUTS%20(1).docx)
 
