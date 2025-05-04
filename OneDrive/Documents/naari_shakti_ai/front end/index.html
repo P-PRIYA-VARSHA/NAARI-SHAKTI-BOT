@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Naari Shakti AI</title>
+</head>
+<body>
+    <h2>Naari Shakti AI</h2>
+<style>
+body {
+            background-color: #000;
+            color: #0ff;
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        h2 {
+            font-size: 2em;
+            text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+        }
+        input, button {
+            margin: 10px;
+            padding: 10px;
+            font-size: 1.2em;
+            border: none;
+            outline: none;
+        }
+        input {
+            background: #111;
+            color: #0ff;
+            border: 2px solid #0ff;
+            border-radius: 5px;
+            box-shadow: 0 0 10px #0ff;
+        }
+        button {
+            background: #0ff;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: 0.3s;
+        }
+        button:hover {
+            background: #fff;
+            color: #000;
+            box-shadow: 0 0 20px #0ff;
+        }
+        #status {
+            font-size: 1.2em;
+            margin-top: 20px;
+            color: #ff0;
+            text-shadow: 0 0 10px #ff0;
+        }
+        #videoPreview {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px #0ff;
+            margin-top: 20px;
+        }
+
+</style>
+
+    <input type="text" id="distressMessage" placeholder="Enter your emergency message">
+    <button onclick="checkDistress()">Submit</button>
+    <button onclick="startSpeechRecognition()">Speak</button>
+
+    <p id="status"></p>
+    <button id="stopTracking" onclick="stopTracking()" style="display:none;">Stop Tracking</button>
+
+    <video id="videoPreview" autoplay muted></video>
+
+    <script>
+        let tracking = false;
+        let locationInterval;
+        let mediaRecorder;
+        let recordedChunks = [];
+        let audioRecorder;
+        let audioChunks = [];
+        const distressKeywords = ["danger", "emergency", "sos", "help", "urgent", "police", "strangers", "following"];
+
+        function checkDistress() {
+            let message = document.getElementById("distressMessage").value.toLowerCase().trim();
+            processMessage(message);
+        }
+
+        function processMessage(message) {
+            if (distressKeywords.some(keyword => message.includes(keyword))) {
+                document.getElementById("status").innerText = " Emergency detected! Tracking location and recording...";
+                startTracking();
+                startRecording();
+            } else {
+                document.getElementById("status").innerText = "No emergency detected.";
+            }
+        }
+
+        function startTracking() {
+            if (!tracking) {
+                tracking = true;
+                document.getElementById("stopTracking").style.display = "block";
+
+                locationInterval = setInterval(() => {
+                    navigator.geolocation.getCurrentPosition(position => {
+                        let data = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude
+                        };
+
+                        fetch("http://127.0.0.1:5000/emergency", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(data)
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`Server responded with ${response.status}`);
+                            }
+                            return response.json();
+                        })
+                        .then(() => document.getElementById("status").innerText = "Location sent successfully!")
+                        .catch(error => {
+                            console.error("Error sending location:", error);
+                            document.getElementById("status").innerText = " sending location!";
+                        });
+                    }, error => {
+                        console.error("Geolocation error:", error);
+                        document.getElementById("status").innerText = "⚠️ Unable to get location!";
+                    });
+                }, 5000);  // Sends location every 10 seconds
+            }
+        }
+
+        function stopTracking() {
+            tracking = false;
+            clearInterval(locationInterval);
+            document.getElementById("status").innerText = " Tracking stopped.";
+            document.getElementById("stopTracking").style.display = "none";
+            stopRecording();
+        }
+
+        function startSpeechRecognition() {
+            let recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.lang = "en-US";
+            recognition.start();
+
+            recognition.onresult = function(event) {
+                let speechText = event.results[0][0].transcript.toLowerCase();
+                document.getElementById("distressMessage").value = speechText;
+                processMessage(speechText);
+            };
+
+            recognition.onerror = function(event) {
+                document.getElementById("status").innerText = "Speech recognition error: " + event.error;
+            };
+        }
+
+        function startRecording() {
+            navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+                document.getElementById("videoPreview").srcObject = stream;
+                
+                mediaRecorder = new MediaRecorder(stream);
+                recordedChunks = [];
+                mediaRecorder.ondataavailable = event => recordedChunks.push(event.data);
+                mediaRecorder.start();
+
+                audioRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                audioRecorder.ondataavailable = event => audioChunks.push(event.data);
+                audioRecorder.start();
+
+                setTimeout(stopRecording, 30000); // Stop recording after 30 seconds
+            }).catch(error => console.error("Error accessing media devices:", error));
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && audioRecorder) {
+                mediaRecorder.stop();
+                audioRecorder.stop();
+
+                let videoBlob = new Blob(recordedChunks, { type: "video/webm" });
+                let audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+
+                sendRecording(videoBlob, "video");
+                sendRecording(audioBlob, "audio");
+            }
+        }
+
+        function sendRecording(blob, type) {
+            let formData = new FormData();
+            formData.append("file", blob, `${type}_${Date.now()}.webm`);
+
+            fetch("http://127.0.0.1:5000/upload", {  // Ensure Flask route matches
+                method: "POST",
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Server responded with ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => console.log("Response:", data))
+            .catch(error => console.error("Error:", error));
+        }
+    </script>
+</body>
+</html>
